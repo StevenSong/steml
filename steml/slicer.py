@@ -38,14 +38,14 @@ def slice(
         names=['barcode', 'inside', 'row', 'col', 'y', 'x'],
     )
     tps = tps[tps['inside'].astype(bool)].sort_values(by=['row', 'col'])
-    tps = [r for _, r in tps[['row', 'col', 'x', 'y']].iterrows()]
+    tps = [r for _, r in tps[['barcode', 'row', 'col', 'x', 'y']].iterrows()]
 
     with Image.open(image) as im:
-        for row, col, x, y in tqdm(tps):
+        for barcode, row, col, x, y in tqdm(tps):
             left = int(x - offset)
             right = int(x + offset)
             top = int(y - offset)
             bottom = int(y + offset)
             tile = im.crop((left, top, right, bottom))
-            tile.save(os.path.join(output, f'{row}_{col}.png'))
+            tile.save(os.path.join(output, f'{row}_{col}_{barcode}.png'))
 
