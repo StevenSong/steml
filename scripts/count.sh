@@ -1,12 +1,13 @@
 #!/bin/bash
 
-spaceranger count --id=gi-demo \
-  --transcriptome=/home/ssong/work/refdata-gex-GRCh38-2020-A \
-  --fastqs=/home/ssong/work/data/demo/fastqs \
+WORKDIR=/mnt/data5
+
+spaceranger count --id=colorectal-cancer-count \
+  --transcriptome=$WORKDIR/data/ref-GRCh38-2020-A \
+  --fastqs=$WORKDIR/data/colorectal-cancer/fastqs \
   --sample=Visium_FFPE_Human_Intestinal_Cancer \
-  --image=/home/ssong/work/data/demo/Visium_FFPE_Human_Intestinal_Cancer_image.jpg \
+  --image=$WORKDIR/data/colorectal-cancer/brightfield.jpg \
   --slide V10L13-021 \
   --area B1 \
   --localcores=16 \
   --localmem=64
-
