@@ -1,4 +1,5 @@
 import os
+import logging
 import numpy as np
 import pandas as pd
 from typing import List, Tuple
@@ -23,8 +24,8 @@ def get_tile_paths_labels(input_dir: str, label: str) -> Paths_Labels:
     labels = pd.concat(labels)
     n = len(paths)
     pos = labels.sum()
-    print(f'Found {n} tiles')
-    print(f'{label}: {pos}/{n} ({pos/n:0.3f})')
+    logging.info(f'Found {n} tiles')
+    logging.info(f'{label}: {pos}/{n} ({pos/n:0.3f})')
     return list(paths), list(labels)
 
 
