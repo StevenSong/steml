@@ -59,42 +59,41 @@ class ResidualStack:
         return x
 
 
-class ResNet18(Model):
-    def __init__(
-        self,
-        input_shape: Tuple[int, ...],
-        num_classes: int,
-        activation: str,
-        lr: float,
-        loss: str,
-        metrics: List[str],
-    ) -> None:
-        conv1 = Conv2D(filters=64, kernel_size=7, strides=2, padding='same')
-        max_pool = MaxPooling2D(pool_size=3, strides=2, padding='same')
-        conv2_stack = ResidualStack(filters=64, kernel_size=3, blocks=2, new_stack=False)
-        conv3_stack = ResidualStack(filters=128, kernel_size=3, blocks=2)
-        conv4_stack = ResidualStack(filters=256, kernel_size=3, blocks=2)
-        conv5_stack = ResidualStack(filters=512, kernel_size=3, blocks=2)
-        avg_pool = GlobalAveragePooling2D()
-        fc1 = Dense(units=num_classes, activation=activation)
+def make_resnet18(
+    input_shape: Tuple[int, ...],
+    num_classes: int,
+    activation: str,
+    lr: float,
+    loss: str,
+    metrics: List[str],
+) -> Model:
+    conv1 = Conv2D(filters=64, kernel_size=7, strides=2, padding='same')
+    max_pool = MaxPooling2D(pool_size=3, strides=2, padding='same')
+    conv2_stack = ResidualStack(filters=64, kernel_size=3, blocks=2, new_stack=False)
+    conv3_stack = ResidualStack(filters=128, kernel_size=3, blocks=2)
+    conv4_stack = ResidualStack(filters=256, kernel_size=3, blocks=2)
+    conv5_stack = ResidualStack(filters=512, kernel_size=3, blocks=2)
+    avg_pool = GlobalAveragePooling2D()
+    fc1 = Dense(units=num_classes, activation=activation)
 
-        inputs = Input(shape=input_shape)
-        x = inputs
-        x = conv1(x)
-        x = max_pool(x)
-        x = conv2_stack(x)
-        x = conv3_stack(x)
-        x = conv4_stack(x)
-        x = conv5_stack(x)
-        x = avg_pool(x)
-        x = fc1(x)
-        outputs = x
-        super().__init__(inputs=inputs, outputs=outputs)
-        optimizer = Adam(learning_rate=lr)
+    inputs = Input(shape=input_shape)
+    x = inputs
+    x = conv1(x)
+    x = max_pool(x)
+    x = conv2_stack(x)
+    x = conv3_stack(x)
+    x = conv4_stack(x)
+    x = conv5_stack(x)
+    x = avg_pool(x)
+    x = fc1(x)
+    outputs = x
+    model = Model(inputs=inputs, outputs=outputs)
+    optimizer = Adam(learning_rate=lr)
 
-        self.compile(
-            optimizer=optimizer,
-            loss=loss,
-            metrics=metrics,
-        )
-        self.summary()
+    model.compile(
+        optimizer=optimizer,
+        loss=loss,
+        metrics=metrics,
+    )
+    model.summary()
+    return model

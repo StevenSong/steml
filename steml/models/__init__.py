@@ -1,2 +1,2 @@
-from ._resnet import ResNet18
+from ._resnet import make_resnet18
 from ._utils import get_callbacks

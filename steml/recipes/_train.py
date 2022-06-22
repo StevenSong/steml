@@ -36,7 +36,8 @@ def train(
     config_gpus({gpu: mem for gpu, mem in gpu_config.items()})
 
     from steml.data.dataset import make_dataset
-    from steml.models import ResNet18, get_callbacks
+    from steml.models import make_resnet18, get_callbacks
+    from tensorflow.keras.models import load_model
 
     train_df = pd.read_csv(train_csv)
     val_df = pd.read_csv(val_csv)
@@ -46,7 +47,7 @@ def train(
     train_ds = make_dataset(paths=train_df['path'], labels=train_df[label], num_classes=num_classes, batch_size=batch_size, num_workers=num_workers, shuffle=True)
     val_ds = make_dataset(paths=val_df['path'], labels=val_df[label], num_classes=num_classes, batch_size=batch_size, num_workers=num_workers, shuffle=True)
 
-    model = ResNet18(
+    model = make_resnet18(
         input_shape=(SIZE, SIZE, 3),
         num_classes=num_classes,
         activation=activation,
@@ -71,6 +72,8 @@ def train(
     history = pd.DataFrame(history.history)
     history.index.name = 'epoch'
     history.to_csv(os.path.join(output_dir, 'training_history.csv'))
+
+    model = load_model(model_file)
 
     test_ds = make_dataset(paths=test_df['path'], labels=test_df[label], num_classes=num_classes, batch_size=batch_size, num_workers=num_workers, shuffle=False)
     y_hat_test = model.predict(test_ds)[:, 1]
@@ -144,7 +147,7 @@ def nested_cross_validate(
                     'lr_patience': lr_patience,
                     'loss': loss,
                     'metrics': metrics,
-                    'output_dir': output_dir,
+                    'output_dir': inner_dir,
                     'num_workers': num_workers,
                     'gpu_config': gpu_config,
                     'skip_log_config': True,

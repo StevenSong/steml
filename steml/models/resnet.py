@@ -1,1 +1,1 @@
-from ._resnet import ResNet18, ResidualBlock, ResidualStack
+from ._resnet import make_resnet18, ResidualBlock, ResidualStack
