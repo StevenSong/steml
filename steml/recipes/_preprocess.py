@@ -6,6 +6,7 @@ from tqdm import tqdm
 from PIL import Image
 from scipy.io import mmread
 from typing import List, Tuple
+from steml.defines import SIZE
 
 
 Image.MAX_IMAGE_PIXELS = 1000000000
@@ -16,6 +17,7 @@ def slice(
     scaling_factors: str,
     tissue_positions: str,
     output: str,
+    size: int = SIZE,
 ) -> None:
     """
     Slice a brightfield HE image into tiles.
@@ -29,6 +31,7 @@ def slice(
     image: <string> Path to brightfield HE image.
     scaling_factors: <string> Path to scale factor JSON from spaceranger count.
     tissue_positions: <string> Path to tissue positions CSV from spaceranger count.
+    size: <int> Pixel length of square output tile.
     output: <string> Path to output folder.
 
     Returns
@@ -40,7 +43,10 @@ def slice(
 
     with open(scaling_factors) as f:
         sfs = json.load(f)
-        offset = sfs['spot_diameter_fullres'] / 2
+
+    offset = sfs['spot_diameter_fullres'] / 2
+    print(f'Original tile size: {offset*2}px')
+    print(f'Resized tile size: {size}px')
 
     tps = pd.read_csv(
         tissue_positions,
@@ -48,16 +54,17 @@ def slice(
         names=['barcode', 'inside', 'row', 'col', 'y', 'x'],
     )
     tps = tps[tps['inside'].astype(bool)].sort_values(by=['row', 'col'])
-    tps = [r for _, r in tps[['barcode', 'row', 'col', 'x', 'y']].iterrows()]
+    tps = [r for _, r in tps[['barcode', 'x', 'y']].iterrows()]
 
     with Image.open(image) as im:
-        for barcode, row, col, x, y in tqdm(tps):
+        for barcode, x, y in tqdm(tps):
             left = int(x - offset)
             right = int(x + offset)
             top = int(y - offset)
             bottom = int(y + offset)
             tile = im.crop((left, top, right, bottom))
-            tile.save(os.path.join(output, f'{row}_{col}_{barcode}.png'))
+            tile = tile.resize(size=(size, size), resample=Image.ANTIALIAS)
+            tile.save(os.path.join(output, f'{barcode}.png'))
 
 
 def label(
