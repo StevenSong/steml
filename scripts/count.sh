@@ -5,7 +5,7 @@ BACK=$PWD
 WORKDIR=/mnt/data5
 
 slides=("slide1" "slide2")
-slide_alts=("A" "B")
+slide_alts=("B" "A")
 areas=("A1" "B1" "C1" "D1")
 area_alts=("1" "2" "3" "4")
 
