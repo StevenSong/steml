@@ -40,7 +40,7 @@ def get_random_splits(
     n = len(paths)
     test_size = int(n * test_ratio)
     val_size = int(n * val_ratio)
-    df = pd.DataFrame({'path': paths, 'labels': labels})
+    df = pd.DataFrame({'path': paths, 'label': labels})
     for i in range(num_splits):
         df_train_val, df_test = train_test_split(
             df,
