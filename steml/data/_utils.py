@@ -3,7 +3,7 @@ import logging
 import numpy as np
 import pandas as pd
 from typing import List, Tuple
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import train_test_split
 
 
 Paths = List[str]
@@ -29,30 +29,36 @@ def get_tile_paths_labels(input_dir: str, label: str) -> Paths_Labels:
     return list(paths), list(labels)
 
 
-def nested_k_fold_split(
-    k: int,
+def get_random_splits(
+    num_splits: int,
     paths: Paths,
     labels: Labels,
-    seed: int = 2022,
-) -> List[Tuple[List[Tuple[Paths_Labels, Paths_Labels]], Paths_Labels]]:
-    paths = np.array(paths)
-    labels = np.array(labels)
-    skf = StratifiedKFold(n_splits=k, shuffle=True, random_state=seed)
+    val_ratio: float = 0.2,
+    test_ratio: float = 0.1,
+) -> List[Tuple[Paths_Labels, Paths_Labels, Paths_Labels]]:
     ret = []
-    for inner_idx, test_idx in skf.split(paths, labels):
-        test_paths = paths[test_idx].tolist()
-        test_labels = labels[test_idx].tolist()
-        inner_paths = paths[inner_idx]
-        inner_labels = labels[inner_idx]
-        inner = []
-        for train_idx, val_idx in skf.split(inner_paths, inner_labels):
-            train_paths = inner_paths[train_idx].tolist()
-            train_labels = inner_labels[train_idx].tolist()
-            val_paths = inner_paths[val_idx].tolist()
-            val_labels = inner_labels[val_idx].tolist()
-            inner.append((
-                (train_paths, train_labels),
-                (val_paths, val_labels),
-            ))
-        ret.append((inner, (test_paths, test_labels)))
+    n = len(paths)
+    test_size = int(n * test_ratio)
+    val_size = int(n * val_ratio)
+    df = pd.DataFrame({'path': paths, 'labels': labels})
+    for i in range(num_splits):
+        df_train_val, df_test = train_test_split(
+            df,
+            test_size=test_size,
+            random_state=i,
+            shuffle=True,
+            stratify=df['label'],
+        )
+        df_train, df_val = train_test_split(
+            df_train_val,
+            test_size=val_size,
+            random_state=i,
+            shuffle=True,
+            stratify=df_train_val['label'],
+        )
+        ret.append((
+            (df_train['path'].tolist(), df_train['label'].tolist()),
+            (df_val['path'].tolist(), df_val['label'].tolist()),
+            (df_test['path'].tolist(), df_test['label'].tolist()),
+        ))
     return ret
