@@ -5,7 +5,7 @@ import pandas as pd
 from tqdm import tqdm
 from PIL import Image
 from scipy.io import mmread
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from steml.defines import SIZE
 from steml.utils import config_logger, LogLevel
 
@@ -18,6 +18,8 @@ def slice(
     tissue_positions: str,
     output_dir: str,
     size: int = SIZE,
+    resize: Optional[int] = None,
+    resize_method: str = 'scale',
     log_level: LogLevel = LogLevel.INFO,
 ) -> None:
     """
@@ -32,6 +34,8 @@ def slice(
     image: <string> Path to brightfield HE image.
     tissue_positions: <string> Path to tissue positions CSV from spaceranger count.
     size: <int> Pixel length of square output tile.
+    resize: <int> Optional new pixel length to resize tile to.
+    resize_method: <string> Either 'scale' or 'pad'. Scale using
     output_dir: <string> Path to output folder.
 
     Returns
@@ -59,6 +63,19 @@ def slice(
             top = int(y - offset)
             bottom = int(y + offset)
             tile = im.crop((left, top, right, bottom))
+
+            if resize is not None and size != resize:
+                if resize_method == 'scale':
+                    tile = tile.resize((resize, resize), Image.ANTIALIAS)
+                elif resize_method == 'pad':
+                    shape = im.size + (len(im.getbands()),)
+                    new_tile = Image.fromarray(np.zeros(shape, dtype=np.uint8))
+                    corner = (resize - size) // 2
+                    new_tile.paste(tile, (corner, corner))
+                    tile = new_tile
+                else:
+                    raise ValueError(f'Unknown resize method: {resize_method}')
+
             tile.save(os.path.join(output_dir, f'{barcode}.png'))
 
 
