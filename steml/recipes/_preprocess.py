@@ -87,7 +87,7 @@ def label(
     name: str,
     output_dir: str,
     log_level: LogLevel = LogLevel.INFO,
-) -> np.array:
+) -> None:
     """
     Generate labels based on gene expression data.
 
