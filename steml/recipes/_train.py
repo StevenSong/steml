@@ -123,7 +123,7 @@ def train_random_splits(
 
     # run all trials
     for trial in range(num_splits):
-        trial_dir = os.path.join(output_dir, str(trial))
+        trial_dir = os.path.join(output_dir, '{trial:0{digits}d}'.format(trial=trial, digits=digits))
         train_csv = os.path.join(trial_dir, 'train.csv')
         val_csv = os.path.join(trial_dir, 'val.csv')
         test_csv = os.path.join(trial_dir, 'test.csv')

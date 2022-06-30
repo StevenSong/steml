@@ -68,7 +68,9 @@ def slice(
                 if resize_method == 'scale':
                     tile = tile.resize((resize, resize), Image.ANTIALIAS)
                 elif resize_method == 'pad':
-                    shape = im.size + (len(im.getbands()),)
+                    if resize < size:
+                        raise ValueError(f'Cannot resize tile smaller with padding (size {size} > {resize})')
+                    shape = (resize, resize, len(tile.getbands()))
                     new_tile = Image.fromarray(np.zeros(shape, dtype=np.uint8))
                     corner = (resize - size) // 2
                     new_tile.paste(tile, (corner, corner))

@@ -5,10 +5,10 @@ from steml.recipes import train_random_splits
 label = 'lymphocyte'
 
 train_random_splits(
-    num_splits=100,
+    num_splits=25,
     label=label,
-    input_dir='/mnt/data5/output/tiles/gi-infection',
-    output_dir=f'/mnt/data5/output/train/{label}',
+    input_dir='/mnt/data5/output/tiles/gi-infection-scaled',
+    output_dir=f'/mnt/data5/output/train/{label}-scaled-tiles',
     activation='softmax',
     batch_size=256,
     epochs=1000,
