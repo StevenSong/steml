@@ -1,2 +1,2 @@
-from ._train import train, nested_cross_validate
+from ._train import train, train_random_splits
 from ._preprocess import slice, label

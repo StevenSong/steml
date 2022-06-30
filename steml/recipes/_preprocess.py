@@ -1,5 +1,4 @@
 import os
-import json
 import logging
 import numpy as np
 import pandas as pd
@@ -16,7 +15,6 @@ Image.MAX_IMAGE_PIXELS = 1000000000
 
 def slice(
     image: str,
-    scaling_factors: str,
     tissue_positions: str,
     output_dir: str,
     size: int = SIZE,
@@ -32,7 +30,6 @@ def slice(
     Parameters
     ----------
     image: <string> Path to brightfield HE image.
-    scaling_factors: <string> Path to scale factor JSON from spaceranger count.
     tissue_positions: <string> Path to tissue positions CSV from spaceranger count.
     size: <int> Pixel length of square output tile.
     output_dir: <string> Path to output folder.
@@ -43,15 +40,8 @@ def slice(
     """
 
     os.makedirs(output_dir, exist_ok=True)
-    log_file = os.path.join(output_dir, 'label.log')
+    log_file = os.path.join(output_dir, 'slice.log')
     config_logger(log_level=log_level, log_file=log_file)
-
-    with open(scaling_factors) as f:
-        sfs = json.load(f)
-
-    offset = sfs['spot_diameter_fullres'] / 2
-    logging.info(f'Original tile size: {offset*2}px')
-    logging.info(f'Resized tile size: {size}px')
 
     tps = pd.read_csv(
         tissue_positions,
@@ -61,6 +51,7 @@ def slice(
     tps = tps[tps['inside'].astype(bool)].sort_values(by=['row', 'col'])
     tps = [r for _, r in tps[['barcode', 'x', 'y']].iterrows()]
 
+    offset = size / 2
     with Image.open(image) as im:
         for barcode, x, y in tqdm(tps):
             left = int(x - offset)
@@ -68,7 +59,6 @@ def slice(
             top = int(y - offset)
             bottom = int(y + offset)
             tile = im.crop((left, top, right, bottom))
-            tile = tile.resize(size=(size, size), resample=Image.ANTIALIAS)
             tile.save(os.path.join(output_dir, f'{barcode}.png'))
 
 
@@ -120,7 +110,7 @@ def label(
     # https://en.wikipedia.org/wiki/Disjunctive_normal_form
 
     os.makedirs(output_dir, exist_ok=True)
-    log_file = os.path.join(output_dir, 'slice.log')
+    log_file = os.path.join(output_dir, 'label.log')
     config_logger(log_level=log_level, log_file=log_file)
 
     genes = {gene for c in conditions for gene, _, _ in c}
@@ -156,6 +146,7 @@ def label(
         clause_strs.append('(' + ' ∧ '.join(gene_strs) + ')')
     df[name] = y.astype(int)
     dnf_str = ' ∨ '.join(clause_strs)
+    logging.info(f'labeled {df[name].sum()}/{len(df)} ({df[name].sum()/len(df):0.3f}) as {name} at {output_dir}')
     logging.info(dnf_str)
 
     df.to_csv(f'{output_dir}/{name}.csv')
