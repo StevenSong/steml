@@ -99,19 +99,20 @@ def train_random_splits(
     log_level: LogLevel = LogLevel.INFO,
 ) -> None:
     os.makedirs(output_dir, exist_ok=True)
-    log_file = os.path.join(output_dir, 'nested_cross_validate.log')
+    log_file = os.path.join(output_dir, 'train_random_splits.log')
     config_logger(log_level=log_level, log_file=log_file)
 
     # setup trials
     from steml.data import get_tile_paths_labels, get_random_splits
     paths, labels = get_tile_paths_labels(input_dir=input_dir, label=label)
     splits = get_random_splits(num_splits=num_splits, paths=paths, labels=labels)
+    digits = len(str(num_splits - 1))  # for 0 padding trial subdirectory names
     for trial, (
         (train_paths, train_labels),
         (val_paths, val_labels),
         (test_paths, test_labels),
     ) in enumerate(splits):
-        trial_dir = os.path.join(output_dir, str(trial))
+        trial_dir = os.path.join(output_dir, '{trial:0{digits}d}'.format(trial=trial, digits=digits))
         os.makedirs(trial_dir, exist_ok=True)
         train_csv = os.path.join(trial_dir, 'train.csv')
         val_csv = os.path.join(trial_dir, 'val.csv')
