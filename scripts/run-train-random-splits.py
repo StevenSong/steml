@@ -7,8 +7,9 @@ label = 'lymphocyte'
 train_random_splits(
     num_splits=25,
     label=label,
-    input_dir='/mnt/data5/output/tiles/gi-infection-scaled',
-    output_dir=f'/mnt/data5/output/train/{label}-scaled-tiles',
+    num_classes=2,
+    input_dir='/mnt/data5/output/tiles/gi-infection-padded',
+    output_dir=f'/mnt/data5/output/train/{label}-padded-tiles',
     activation='softmax',
     batch_size=256,
     epochs=1000,
