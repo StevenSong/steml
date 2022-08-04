@@ -1,3 +1,6 @@
+ipywidgets
+# see installation page for additional config for jupyter lab
+# https://ipywidgets.readthedocs.io/en/latest/user_install.html
 jupyterlab
 matplotlib
 numpy

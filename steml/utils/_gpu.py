@@ -1,22 +1,19 @@
-from typing import Dict
+import logging
+from steml.defines import GPU_CONFIG
 
 
-def config_gpus(gpus: Dict[int, int]) -> None:
-    """
-    Set available GPUs and memory limits
-
-    Parameters
-    ----------
-    gpus: <Dict of int to int> Dictionary of GPU index to memory limit in MB.
-          If memory limit is -1, do not limit memory for the given GPU.
-    """
+def config_gpu(gpu_config: GPU_CONFIG) -> None:
+    gpu, mem = gpu_config
+    if mem == -1:
+        logging.debug(f'Configuring all available memory on GPU {gpu}')
+    else:
+        logging.debug(f'Configuring {mem} MB of memory on GPU {gpu}')
     import tensorflow as tf
     all_gpus = tf.config.list_physical_devices('GPU')
-    tf.config.set_visible_devices([all_gpus[gpu] for gpu in gpus.keys()], 'GPU')
-    for gpu, mem in gpus.items():
-        if mem == -1:
-            continue
-        tf.config.set_logical_device_configuration(
-            all_gpus[gpu],
-            [tf.config.LogicalDeviceConfiguration(memory_limit=mem)],
-        )
+    tf.config.set_visible_devices([all_gpus[gpu]], 'GPU')
+    if mem == -1:
+        return
+    tf.config.set_logical_device_configuration(
+        all_gpus[gpu],
+        [tf.config.LogicalDeviceConfiguration(memory_limit=mem)],
+    )

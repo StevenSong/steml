@@ -1,15 +1,7 @@
 import sys
 import logging.config
-from enum import Enum
 from typing import Optional, Dict
-
-
-class LogLevel(Enum):
-    DEBUG = 10
-    INFO = 20
-    WARNING = 30
-    ERROR = 40
-    CRITICAL = 50
+from steml.defines import LogLevel
 
 
 def config_logger(

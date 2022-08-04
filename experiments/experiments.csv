@@ -1,0 +1,14 @@
+Experiment,Label,Slides,Outer,Inner,Epochs,LR Schedule,Augment,Balance,Num Models,Folder
+1,lymphocyte,both,loo,4-fold-cv,up to 100,lr = 0.001,none,none,7,leave-one-out
+2,lymphocyte,both,loo,4-fold-cv,up to 100,lr = 0.001,"uniform rotate, 1/4 per flip",none,7,leave-one-out-augment
+3,lymphocyte,both,loo,4-fold-cv,up to 100,"lr = 0.01, scale = 0.1 every 20 epochs","uniform rotate, 1/4 per flip",none,7,leave-one-out-lr
+4,lymphocyte,both,loo,loo,early stopping patience 15,"lr = 0.01, scale = 0.1 when no val improvement for 5 epochs","uniform rotate, 1/4 per flip",none,42,nested-leave-one-out
+5,lymphocyte,both,loo,loo,early stopping patience 15,"lr = 0.01, scale = 0.1 when no val improvement for 5 epochs","uniform rotate, 1/4 per flip",balanced label,42,nested-leave-one-out-balanced
+6,lymphocyte,both,loo,none,early stopping when train auc does not improve by 0.1 for 6 epochs,lr = 0.01,"uniform rotate, 1/4 per flip",none,7,leave-one-out-early-stop
+7,lymphocyte,H. pylori,loo,4-fold-cv,up to 100,lr = 0.001,"uniform rotate, 1/4 per flip",none,4,leave-one-out-hpylori
+8,lymphocyte,H. pylori,loo,loo,early stopping patience 15,"lr = 0.01, scale = 0.1 when no val improvement for 5 epochs","uniform rotate, 1/4 per flip",none,12,nested-leave-one-out-hpylori
+9,epithelium,"C.diff/C1 (train), C.diff/B1 (test)",none,none,50,lr = 0.01,"uniform rotate, 1/4 per flip",none,1,colon-epithelium
+10,epithelium,C.diff,loo,none,50,lr = 0.01,"uniform rotate, 1/4 per flip",none,3,colon-epithelium-loo-cdiff
+11,epithelium,both,loo,none,50,lr = 0.01,"uniform rotate, 1/4 per flip",none,7,colon-epithelium-loo
+12,EPCAM,C.diff,loo,none,50,lr = 0.01,"uniform rotate, 1/4 per flip",none,3,colon-EPCAM-loo-cdiff
+13,EPCAM,both,loo,none,50,lr = 0.01,"uniform rotate, 1/4 per flip",none,7,colon-EPCAM-loo
