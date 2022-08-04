@@ -2,17 +2,15 @@ import os
 import logging
 import numpy as np
 import pandas as pd
-from time import sleep
-from collections import defaultdict
 from multiprocessing import Process
-from typing import Dict, List, Optional, Tuple, Callable
+from typing import List, Optional, Tuple, Union
 from sklearn.model_selection import StratifiedKFold
-from steml.defines import SIZE, GPU_CONFIG
-from steml.utils import config_logger, LogLevel
+from steml.defines import SIZE, GPU_CONFIG, LogLevel
+from steml.utils import config_logger, setup_jobs, dispatch_next_job, finish_jobs
 
 
 def train(
-    label: str,
+    label: Union[str, List[str]],
     num_classes: int,
     train_csv: str,
     activation: str,
@@ -24,6 +22,7 @@ def train(
     output_dir: str,
     num_workers: int,
     callback_monitor: str,
+    continuous: bool = False,
     cache: bool = False,
     shuffle_train: bool = True,
     augment_train: bool = True,
@@ -37,10 +36,13 @@ def train(
     lr_reduction: Optional[float] = None,
     lr_patience: Optional[int] = None,
     num_reductions: Optional[int] = None,
+    min_delta: float = 0.0001,
     gpu_config: Optional[Tuple[int, int]] = None,
     log_level: LogLevel = LogLevel.INFO,
     skip_log_config: bool = False,
 ) -> None:
+    if not isinstance(label, list):
+        label = [label]
     os.makedirs(output_dir, exist_ok=True)
     if not skip_log_config:
         log_file = os.path.join(output_dir, 'train.log')
@@ -65,6 +67,7 @@ def train(
         shuffle=shuffle_train,
         augment=augment_train,
         balance=balance_train,
+        continuous=continuous,
     )
 
     val_ds = None
@@ -80,6 +83,7 @@ def train(
             shuffle=shuffle_val,
             augment=augment_val,
             balance=balance_val,
+            continuous=continuous,
         )
 
     model = make_resnet18(
@@ -107,6 +111,7 @@ def train(
             lr_patience=lr_patience,
             num_reductions=num_reductions,
             monitor=callback_monitor,
+            min_delta=min_delta,
         ),
     )
     history = pd.DataFrame(history.history)
@@ -117,9 +122,27 @@ def train(
     history.to_csv(history_file)
     logging.info(f'Saved training history to {history_file}')
 
+    model = load_model(model_file)
+    logging.info(f'Loaded best model from {model_file}')
+    train_df = pd.read_csv(train_csv)
+    train_ds = make_dataset(
+        paths=train_df['path'],
+        labels=train_df[label],
+        num_classes=num_classes,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        cache=False,
+        shuffle=False,
+        augment=False,
+        balance=False,
+        continuous=continuous,
+    )
+    y_pred_train = model.predict(train_ds)
+    predictions_file = os.path.join(output_dir, 'train_predictions.csv')
+    pd.concat([pd.Series(train_df['path'], name='path'), pd.DataFrame(y_pred_train, columns=label)], axis=1).to_csv(predictions_file, index=False)
+    logging.info(f'Generated train predictions to {predictions_file}')
+
     if test_csv is not None:
-        model = load_model(model_file)
-        logging.info(f'Loaded best model from {model_file}')
         test_df = pd.read_csv(test_csv)
         test_ds = make_dataset(
             paths=test_df['path'],
@@ -131,16 +154,45 @@ def train(
             shuffle=False,
             augment=False,
             balance=False,
+            continuous=continuous,
         )
-        y_pred_test = model.predict(test_ds)[:, 1]
+        y_pred_test = model.predict(test_ds)
         predictions_file = os.path.join(output_dir, 'test_predictions.csv')
-        pd.DataFrame({'path': test_df['path'], label: y_pred_test}).to_csv(predictions_file, index=False)
+        pd.concat([pd.Series(test_df['path'], name='path'), pd.DataFrame(y_pred_test, columns=label)], axis=1).to_csv(predictions_file, index=False)
         logging.info(f'Generated test predictions to {predictions_file}')
+
+
+def _normalize_and_save(
+    label: Union[str, List[str]],
+    train_df: pd.DataFrame,
+    train_csv: str,
+    scale_csv: str,
+    val_df: Optional[pd.DataFrame] = None,
+    val_csv: Optional[str] = None,
+    test_df: Optional[pd.DataFrame] = None,
+    test_csv: Optional[str] = None,
+):
+    if not isinstance(label, list):
+        label = [label]
+    mean = train_df[label].mean()
+    std = train_df[label].std(ddof=0)
+    for df, df_csv in [(train_df, train_csv), (val_df, val_csv), (test_df, test_csv)]:
+        if df is not None:
+            df = df.copy()
+            for l in label:
+                df = pd.concat([df, pd.Series(df[l], name=f'{l}_original')], axis=1)
+                # df[f'{l}_original'] = df[l]
+                df[l] = (df[l] - mean[l]) / std[l]
+            df.to_csv(df_csv, index=False)
+    scale_df = pd.concat([mean.reset_index()[[0]].T, std.reset_index()[[0]].T])
+    scale_df.columns = label
+    scale_df.index = ['mean', 'std']
+    scale_df.to_csv(scale_csv)
 
 
 def train_random_splits(
     num_splits: int,
-    label: str,
+    label: Union[str, List[str]],
     num_classes: int,
     input_dir: str,
     output_dir: str,
@@ -155,6 +207,7 @@ def train_random_splits(
     metrics: List[str],
     num_workers: int,
     gpu_config: Tuple[int, int],
+    continuous: bool = False,
     cache: bool = False,
     shuffle_train: bool = True,
     shuffle_val: bool = True,
@@ -181,9 +234,20 @@ def train_random_splits(
         train_csv = os.path.join(trial_dir, 'train.csv')
         val_csv = os.path.join(trial_dir, 'val.csv')
         test_csv = os.path.join(trial_dir, 'test.csv')
-        pd.DataFrame({'path': train_paths, label: train_labels}).to_csv(train_csv, index=False)
-        pd.DataFrame({'path': val_paths, label: val_labels}).to_csv(val_csv, index=False)
-        pd.DataFrame({'path': test_paths, label: test_labels}).to_csv(test_csv, index=False)
+        train_df = pd.DataFrame({'path': train_paths, label: train_labels})
+        val_df = pd.DataFrame({'path': val_paths, label: val_labels})
+        test_df = pd.DataFrame({'path': test_paths, label: test_labels})
+        if continuous:
+            _normalize_and_save(
+                label=label,
+                scale_csv=os.path.join(trial_dir, 'scale.csv'),
+                train_df=train_df,
+                train_csv=train_csv,
+                val_df=val_df,
+                val_csv=val_csv,
+                test_df=test_df,
+                test_csv=test_csv,
+            )
 
     # run all trials
     for trial in range(num_splits):
@@ -220,17 +284,98 @@ def train_random_splits(
                 'num_workers': num_workers,
                 'gpu_config': gpu_config,
                 'skip_log_config': True,
+                'continuous': continuous,
             },
         )
         p.start()
         p.join()
 
 
-def train_leave_one_out(
-    label: str,
+def train_loo(
+    label: Union[str, List[str]],
+    num_classes: int,
+    samples: List[Tuple[str, pd.DataFrame]],
+    activation: str,
+    batch_size: int,
+    epochs: int,
+    patience: int,
+    lr: float,
+    loss: str,
+    metrics: List[str],
+    callback_monitor: str,
+    min_delta: float,
+    output_dir: str,
+    num_workers: int,
+    multi_gpu_config: List[Tuple[int, int]],
+    continuous: bool = False,
+    cache: bool = False,
+    shuffle_train: bool = True,
+    augment_train: bool = False,
+    balance_train: bool = False,
+    log_level: LogLevel = LogLevel.INFO,
+) -> None:
+    os.makedirs(output_dir, exist_ok=True)
+    log_file = os.path.join(output_dir, 'train_nested_leave_one_out.log')
+    config_logger(log_level=log_level, log_file=log_file)
+    gpu_jobs = setup_jobs(multi_gpu_config)
+
+    for test_sample, test_df in samples:
+        train_df = pd.concat([df for sample, df in samples if sample != test_sample])
+        trial_dir = os.path.join(output_dir, test_sample)
+        os.makedirs(trial_dir, exist_ok=True)
+        train_csv = os.path.join(trial_dir, 'train.csv')
+        test_csv = os.path.join(trial_dir, 'test.csv')
+        if continuous:
+            _normalize_and_save(
+                label=label,
+                scale_csv=os.path.join(trial_dir, 'scale.csv'),
+                train_df=train_df,
+                train_csv=train_csv,
+                test_df=test_df,
+                test_csv=test_csv,
+            )
+
+        def start_next_job(gpu_config: GPU_CONFIG) -> Process:
+            p = Process(
+                target=train,
+                name=f'Test: {test_sample}',
+                kwargs={
+                    'label': label,
+                    'num_classes': num_classes,
+                    'train_csv': train_csv,
+                    'test_csv': test_csv,
+                    'cache': cache,
+                    'shuffle_train': shuffle_train,
+                    'augment_train': augment_train,
+                    'balance_train': balance_train,
+                    'activation': activation,
+                    'batch_size': batch_size,
+                    'epochs': epochs,
+                    'patience': patience,
+                    'lr': lr,
+                    'loss': loss,
+                    'metrics': metrics,
+                    'min_delta': min_delta,
+                    'callback_monitor': callback_monitor,
+                    'output_dir': trial_dir,
+                    'num_workers': num_workers,
+                    'gpu_config': gpu_config,
+                    'skip_log_config': True,
+                    'continuous': continuous,
+                },
+            )
+            p.start()
+            return p
+        gpu_jobs = dispatch_next_job(gpu_jobs, start_next_job)
+        logging.info(f'Training with Test: {test_sample}')
+    finish_jobs(gpu_jobs)
+
+
+def train_outer_loo_inner_cv(
+    label: Union[str, List[str]],
     num_classes: int,
     num_inner_splits: int,
-    input_dir: str,
+    samples: List[Tuple[str, pd.DataFrame]],
     activation: str,
     batch_size: int,
     epochs: int,
@@ -241,49 +386,50 @@ def train_leave_one_out(
     metrics: List[str],
     output_dir: str,
     num_workers: int,
-    gpu_config: Tuple[int, int],
+    multi_gpu_config: List[Tuple[int, int]],
+    continuous: bool = False,
     cache: bool = False,
     shuffle_train: bool = True,
     augment_train: bool = False,
+    balance_train: bool = False,
     log_level: LogLevel = LogLevel.INFO,
 ) -> None:
     os.makedirs(output_dir, exist_ok=True)
     log_file = os.path.join(output_dir, 'train_leave_one_out.log')
     config_logger(log_level=log_level, log_file=log_file)
-
-    # load paths/labels
-    paths = defaultdict(dict)
-    for slide in ['C.diff', 'H.pylori']:
-        for section in ['A1', 'B1', 'C1', 'D1']:
-            root = os.path.join(input_dir, slide, section)
-            df = pd.read_csv(os.path.join(root, f'{label}.csv'))
-            df['path'] = root + '/' + df['barcode'] + '.png'
-            paths[slide][section] = df
+    gpu_jobs = setup_jobs(multi_gpu_config)
 
     # leave one out
-    for slide in ['H.pylori', 'C.diff']:
-        for section in ['A1', 'B1', 'C1', 'D1']:
-            train_df = pd.concat([df for k1, v in paths.items() for k2, df in v.items() if k1 != slide and k2 != section], copy=False)
-            test_df = paths[slide][section]
+    for test_sample, test_df in samples:
+        train_df = pd.concat([df for sample, df in samples if sample != test_sample], copy=False)
 
-            # nested crossval to determine best number of epochs
-            logging.info(f'Finding optimal number of epochs by {num_inner_splits}-fold cross val with {slide}/{section} holdout')
-            skf = StratifiedKFold(n_splits=num_inner_splits, shuffle=True, random_state=2022)
-            inner_splits = []
-            for inner_train_idx, inner_test_idx in skf.split(train_df['path'], train_df[label]):
-                inner_train_df = train_df.iloc[inner_train_idx]
-                inner_test_df = train_df.iloc[inner_test_idx]
-                inner_splits.append((inner_train_df, inner_test_df))
-            trial_bests = []
-            for trial, (inner_train_df, inner_test_df) in enumerate(inner_splits):
-                trial_dir = os.path.join(output_dir, slide, section, str(trial))
-                os.makedirs(trial_dir, exist_ok=True)
-                train_csv = os.path.join(trial_dir, 'train.csv')
-                test_csv = os.path.join(trial_dir, 'test.csv')
-                inner_train_df.to_csv(train_csv, index=False)
-                inner_test_df.to_csv(test_csv, index=False)
-                logging.info(f'Running inner trial {trial}')
-                logging.info(f'VAL LOSS IS TEST SET')
+        # nested crossval to determine best number of epochs
+        logging.info(
+            f'Finding optimal number of epochs by {num_inner_splits}-fold cross val with {test_sample} holdout')
+        skf = StratifiedKFold(n_splits=num_inner_splits, shuffle=True, random_state=2022)
+        inner_splits = []
+        for inner_train_idx, inner_test_idx in skf.split(train_df['path'], train_df[label]):
+            inner_train_df = train_df.iloc[inner_train_idx]
+            inner_test_df = train_df.iloc[inner_test_idx]
+            inner_splits.append((inner_train_df, inner_test_df))
+        trial_bests = []
+        for trial, (inner_train_df, inner_test_df) in enumerate(inner_splits):
+            trial_dir = os.path.join(output_dir, test_sample, str(trial))
+            os.makedirs(trial_dir, exist_ok=True)
+            train_csv = os.path.join(trial_dir, 'train.csv')
+            test_csv = os.path.join(trial_dir, 'test.csv')
+            if continuous:
+                _normalize_and_save(
+                    label=label,
+                    scale_csv=os.path.join(trial_dir, 'scale.csv'),
+                    train_df=inner_train_df,
+                    train_csv=train_csv,
+                    test_df=inner_test_df,
+                    test_csv=test_csv,
+                )
+
+            def start_next_job(gpu_config: GPU_CONFIG) -> Process:
+                logging.info(f'Running inner trial {test_sample}/{trial}')
                 p = Process(
                     target=train,
                     name=f'Trial {trial}',
@@ -295,8 +441,10 @@ def train_leave_one_out(
                         'cache': cache,
                         'shuffle_train': shuffle_train,
                         'augment_train': augment_train,
+                        'balance_train': balance_train,
                         'shuffle_val': False,
                         'augment_val': False,
+                        'balance_val': False,
                         'callback_monitor': 'loss',
                         'activation': activation,
                         'batch_size': batch_size,
@@ -310,79 +458,75 @@ def train_leave_one_out(
                         'num_workers': num_workers,
                         'gpu_config': gpu_config,
                         'skip_log_config': True,
+                        'continuous': continuous,
                     },
                 )
                 p.start()
-                p.join()
-                history = pd.read_csv(os.path.join(trial_dir, 'history.csv'))
-                trial_best = np.argmin(history['val_loss']) + 1
-                trial_bests.append(trial_best)
-                logging.info(f'Inner trial {trial} best epoch {trial_best}')
-            best_epoch = np.round(np.mean(trial_bests)).astype(int)
-            logging.info(f'Holdout {slide}/{section} average best epoch from inner folds {best_epoch}')
+                return p
 
-            # run outer fold using best number of epochs
-            trial_dir = os.path.join(output_dir, slide, section)
-            os.makedirs(trial_dir, exist_ok=True)
-            train_csv = os.path.join(trial_dir, 'train.csv')
-            test_csv = os.path.join(trial_dir, 'test.csv')
-            train_df.to_csv(train_csv, index=False)
-            test_df.to_csv(test_csv, index=False)
-            logging.info(f'Running outer trial with {slide}/{section} holdout')
-            p = Process(
-                target=train,
-                name=f'Trial {slide}/{section}',
-                kwargs={
-                    'label': label,
-                    'num_classes': num_classes,
-                    'train_csv': train_csv,
-                    'test_csv': test_csv,
-                    'cache': cache,
-                    'shuffle_train': shuffle_train,
-                    'augment_train': augment_train,
-                    'callback_monitor': 'loss',
-                    'activation': activation,
-                    'batch_size': batch_size,
-                    'epochs': best_epoch,
-                    'lr': lr,
-                    'lr_reduction': lr_reduction,
-                    'num_reductions': num_reductions,
-                    'loss': loss,
-                    'metrics': metrics,
-                    'output_dir': trial_dir,
-                    'num_workers': num_workers,
-                    'gpu_config': gpu_config,
-                    'skip_log_config': True,
-                },
+            gpu_jobs = dispatch_next_job(gpu_jobs, start_next_job)
+        finish_jobs(gpu_jobs)
+
+        for trial, _ in enumerate(inner_splits):
+            trial_dir = os.path.join(output_dir, test_sample, str(trial))
+            history = pd.read_csv(os.path.join(trial_dir, 'history.csv'))
+            trial_best = np.argmin(history['val_loss']) + 1
+            trial_bests.append(trial_best)
+            logging.info(f'Inner trial {test_sample}/{trial} best epoch {trial_best}')
+        best_epoch = np.round(np.mean(trial_bests)).astype(int)
+        logging.info(f'Holdout {test_sample} average best epoch from inner folds {best_epoch}')
+
+        # run outer fold using best number of epochs
+        trial_dir = os.path.join(output_dir, test_sample)
+        os.makedirs(trial_dir, exist_ok=True)
+        train_csv = os.path.join(trial_dir, 'train.csv')
+        test_csv = os.path.join(trial_dir, 'test.csv')
+        if continuous:
+            _normalize_and_save(
+                label=label,
+                scale_csv=os.path.join(trial_dir, 'scale.csv'),
+                train_df=train_df,
+                train_csv=train_csv,
+                test_df=test_df,
+                test_csv=test_csv,
             )
-            p.start()
-            p.join()
+        logging.info(f'Running outer trial with {test_sample} holdout')
+        p = Process(
+            target=train,
+            name=f'Trial {test_sample}',
+            kwargs={
+                'label': label,
+                'num_classes': num_classes,
+                'train_csv': train_csv,
+                'test_csv': test_csv,
+                'cache': cache,
+                'shuffle_train': shuffle_train,
+                'augment_train': augment_train,
+                'balance_train': balance_train,
+                'callback_monitor': 'loss',
+                'activation': activation,
+                'batch_size': batch_size,
+                'epochs': best_epoch,
+                'lr': lr,
+                'lr_reduction': lr_reduction,
+                'num_reductions': num_reductions,
+                'loss': loss,
+                'metrics': metrics,
+                'output_dir': trial_dir,
+                'num_workers': num_workers,
+                'gpu_config': multi_gpu_config[0],
+                'skip_log_config': True,
+                'continuous': continuous,
+            },
+        )
+        p.start()
+        p.join()
 
 
-def dispatch_next_job(
-    gpu_jobs: List[Tuple[GPU_CONFIG, Optional[Process]]],
-    start_next_job: Callable[[GPU_CONFIG], Process],
-    refresh: float = 0.5
-) -> List[Tuple[GPU_CONFIG, Optional[Process]]]:
-    while True:
-        for idx, (gpu_config, job) in enumerate(gpu_jobs):
-            if job is None:
-                job = start_next_job(gpu_config)
-                gpu_jobs[idx] = (gpu_config, job)
-                return gpu_jobs
-            else:
-                if not job.is_alive():
-                    job.join()
-                    job = start_next_job(gpu_config)
-                    gpu_jobs[idx] = (gpu_config, job)
-                    return gpu_jobs
-        sleep(refresh)
-
-
-def train_nested_leave_one_out(
-    label: str,
+def train_nested_loo(
+    label: Union[str, List[str]],
     num_classes: int,
-    input_dir: str,
+    samples: List[Tuple[str, pd.DataFrame]],
     activation: str,
     batch_size: int,
     epochs: int,
@@ -395,6 +539,7 @@ def train_nested_leave_one_out(
     output_dir: str,
     num_workers: int,
     multi_gpu_config: List[Tuple[int, int]],
+    continuous: bool = False,
     cache: bool = False,
     shuffle_train: bool = True,
     augment_train: bool = False,
@@ -407,17 +552,8 @@ def train_nested_leave_one_out(
     os.makedirs(output_dir, exist_ok=True)
     log_file = os.path.join(output_dir, 'train_nested_leave_one_out.log')
     config_logger(log_level=log_level, log_file=log_file)
+    gpu_jobs = setup_jobs(multi_gpu_config)
 
-    # load paths/labels
-    samples = []
-    for slide in ['C.diff', 'H.pylori']:
-        for section in ['A1', 'B1', 'C1', 'D1']:
-            root = os.path.join(input_dir, slide, section)
-            df = pd.read_csv(os.path.join(root, f'{label}.csv'))
-            df['path'] = root + '/' + df['barcode'] + '.png'
-            samples.append((f'{slide}.{section}', df))
-
-    gpu_jobs = [(gpu_config, None) for gpu_config in multi_gpu_config]
     for test_sample, test_df in samples:
         for val_sample, val_df in samples:
             if val_sample == test_sample:
@@ -428,9 +564,18 @@ def train_nested_leave_one_out(
             train_csv = os.path.join(trial_dir, 'train.csv')
             val_csv = os.path.join(trial_dir, 'val.csv')
             test_csv = os.path.join(trial_dir, 'test.csv')
-            train_df.to_csv(train_csv, index=False)
-            val_df.to_csv(val_csv, index=False)
-            test_df.to_csv(test_csv, index=False)
+            if continuous:
+                _normalize_and_save(
+                    label=label,
+                    scale_csv=os.path.join(trial_dir, 'scale.csv'),
+                    train_df=train_df,
+                    train_csv=train_csv,
+                    val_df=val_df,
+                    val_csv=val_csv,
+                    test_df=test_df,
+                    test_csv=test_csv,
+                )
+
             def start_next_job(gpu_config: GPU_CONFIG) -> Process:
                 p = Process(
                     target=train,
@@ -462,6 +607,7 @@ def train_nested_leave_one_out(
                         'num_workers': num_workers,
                         'gpu_config': gpu_config,
                         'skip_log_config': True,
+                        'continuous': continuous,
                     },
                 )
                 p.start()

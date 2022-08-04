@@ -1,6 +1,6 @@
 import numpy as np
 import tensorflow as tf
-from typing import Tuple, List
+from typing import Tuple, List, Union
 
 
 def _load_tile(filename: tf.Tensor, label: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
@@ -21,7 +21,7 @@ def _random_rotate_flip_tile(tile: tf.Tensor, label: tf.Tensor) -> Tuple[tf.Tens
 
 def make_dataset(
     paths: List[str],
-    labels: List[int],
+    labels: List[Union[int, float]],
     num_classes: int,
     batch_size: int,
     num_workers: int,
@@ -29,7 +29,10 @@ def make_dataset(
     shuffle: bool = True,
     augment: bool = False,
     balance: bool = False,
+    continuous: bool = False,
 ) -> tf.data.Dataset:
+    if continuous:
+        assert not balance
     # cache before shuffling, augmenting, or balancing
     if balance:
         paths = np.array(paths)
@@ -56,7 +59,9 @@ def make_dataset(
         ])
         ds = tf.data.Dataset.zip((balanced_ds, tf.data.Dataset.range(len(labels)))).map(lambda dat, _: dat)
     else:
-        ds = tf.data.Dataset.from_tensor_slices((paths, tf.one_hot(labels, num_classes)))
+        if not continuous:
+            labels = tf.one_hot(labels, num_classes)
+        ds = tf.data.Dataset.from_tensor_slices((paths, labels))
         if cache:
             ds = ds.map(_load_tile, num_parallel_calls=num_workers)
             ds = ds.cache()

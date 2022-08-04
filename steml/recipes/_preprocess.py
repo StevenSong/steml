@@ -1,16 +1,46 @@
 import os
+import gzip
 import logging
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from PIL import Image
-from scipy.io import mmread
+from scipy.io import mmread, mmwrite
 from typing import List, Tuple, Optional
-from steml.defines import SIZE
-from steml.utils import config_logger, LogLevel
+from steml.defines import SIZE, LogLevel
+from steml.utils import config_logger
 
 
 Image.MAX_IMAGE_PIXELS = 1000000000
+
+
+def lognorm(
+    feature_barcode_matrix: str,
+    output_dir: str,
+    normalize: bool = True,
+    target: int = 10000,
+    use_slide_size: bool = True,
+    log_scale: bool = True,
+    log_level: LogLevel = LogLevel.INFO,
+):
+    os.makedirs(output_dir, exist_ok=True)
+    log_file = os.path.join(output_dir, 'lognorm.log')
+    config_logger(log_level=log_level, log_file=log_file)
+
+    if not normalize and not log_scale:
+        raise ValueError('Nothing to do if both normalize == False and log_scale == False')
+    if feature_barcode_matrix == output_dir:
+        raise ValueError('Input and output directories are the same, would overwrite, aborting! Please make a copy')
+    mat = mmread(os.path.join(feature_barcode_matrix, 'matrix.mtx.gz'))
+    if normalize:
+        t = mat.shape[1]  # number of spots in slide
+        z = mat.sum()  # sum of all counts in slide
+        t = t if use_slide_size else 1
+        mat = mat * t / z * target  # (z/t) is average count per spot for the slide
+    if log_scale:
+        mat = mat.log1p()
+    with gzip.open(os.path.join(output_dir, 'matrix.mtx.gz'), 'wb') as gz:
+        mmwrite(gz, mat)
 
 
 def slice(
@@ -84,7 +114,8 @@ def slice(
 def label(
     feature_barcode_matrix: str,
     conditions: List[List[Tuple[str, bool, int]]],
-    name: str,
+    name: Optional[str],
+    tile_dir: str,
     output_dir: str,
     log_level: LogLevel = LogLevel.INFO,
 ) -> None:
@@ -167,5 +198,5 @@ def label(
     dnf_str = ' ∨ '.join(clause_strs)
     logging.info(f'labeled {df[name].sum()}/{len(df)} ({df[name].sum()/len(df):0.3f}) as {name} at {output_dir}')
     logging.info(dnf_str)
-
+    df['path'] = tile_dir + '/' + df.index + '.png'
     df.to_csv(f'{output_dir}/{name}.csv')
